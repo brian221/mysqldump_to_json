@@ -1,159 +1,146 @@
-var Converter = (function () {
+const _fs = require('fs')
 
-  var _fs = null;
-  var _fileLines = null;
-  var _currentLine = null;
-  var _collections = [];
+const numbers = ['int', 'decimal', 'smallint', 'mediumint', 'bigint']
+const strings = ['varchar', 'text', 'date', 'timestamp', 'longtext']
+const booleans = ['tinyint']
 
-  var reportError = function (errorText) {
-    console.log('ERROR: ' + errorText);
-    process.exit(1);
-  };
+const Converter = (() => {
+  const readFile = async (fileName) => {
+    const fileAsString = await _fs.readFileSync(fileName, 'utf8')
+    return fileAsString.split('\n')
+  }
 
-  var getNextLine = function () {
-    return _fileLines.shift().trim();
-  };
+  const startsWith = function (str, textToFind) {
+    return str.trim().indexOf(textToFind.trim()) === 0
+  }
 
-  var hasMoreLines = function () {
-    return _fileLines.length > 0;
-  };
-
-  var readFile = function (fileName) {
-    var fileAsString = _fs.readFileSync(fileName, 'utf8');
-    _fileLines = fileAsString.split('\n');
-  };
-
-  var startsWith = function (str, textToFind) {
-    return str.trim().indexOf(textToFind.trim()) === 0;
-  };
-
-  var convertData = function (data, type) {
-    if(startsWith(type, 'varchar') || startsWith(type, 'text') || startsWith(type, 'date')) {
-      return data;
+  const convertData = function (data, type) {
+    if (type.indexOf('(') > -1) {
+      type = type.substring(0, type.indexOf('('))
     }
-    else if(startsWith(type, 'int') || startsWith(type, 'decimal')) {
-      return Number(data);
+
+    switch (true) {
+      case strings.includes(type):
+        return data
+      case numbers.includes(type):
+        return Number(data)
+      case booleans.includes(type):
+         return data == 1 // eslint-disable-line
+      default:
+        console.log('Don\'t know this type: ' + type)
+        return data
     }
-    else if(startsWith(type, 'tinyint')) {
-      return data == 1;
-    }
-    else {
-      console.log('Don\'t know this type: ' + type);
-      return data;
-    }
-  };
+  }
 
-  var readNextTableDef = function () {
-    while(hasMoreLines()) {
-      var currentLine = getNextLine();
+  const populateTableDefs = async (fileLines) => {
+    const _collections = {}
+    let line = 0
+    while (line < fileLines.length) {
+      let currentLine = fileLines[line].trim()
 
-      if(startsWith(currentLine, 'CREATE TABLE')) {
-        var tableName = currentLine.split('`')[1];
-        console.log('Converting table: ' + tableName);
-        currentLine = getNextLine();
-        var fields = [];
+      if (startsWith(currentLine, 'CREATE TABLE')) {
+        const tableName = currentLine.split('`')[1]
 
-        while(startsWith(currentLine, '`')) {
-          var parts = currentLine.split('`');
-          var fieldName = parts[1];
-          var fieldType = parts[2].split(' ')[1];
+        line++
+        currentLine = fileLines[line].trim()
+        const fields = []
 
-          if(fieldName === 'id') {
-            fieldName = '_id';
-            fieldType = 'text';
+        while (startsWith(currentLine, '`')) {
+          const parts = currentLine.split('`')
+          const fieldName = parts[1]
+          let fieldType = parts[2].split(' ')[1]
+
+          if (fieldName === 'id') {
+            fieldType = 'text'
           }
 
           fields.push({
             name: fieldName,
             type: fieldType
-          });
+          })
 
-          currentLine = getNextLine();
+          line++
+          currentLine = fileLines[line].trim()
         }
 
-        _collections.push({
+        _collections[tableName] = {
           name: tableName,
           fields: fields
-        });
-
-        return;
+        }
       }
+      line++
     }
-  };
+    return _collections
+  }
 
-  var readTableValues = function () {
-    var currentCollection = _collections[_collections.length - 1];
-    var tableName = currentCollection.name;
-    var fields = currentCollection.fields;
+  const readTableValues = async (currentCollection, fileLines) => {
+    const { fields } = currentCollection
 
-    while(hasMoreLines()) {
-      var currentLine = getNextLine();
+    const insertKey = 'INSERT INTO `' + currentCollection.name + '` VALUES '
+    let line = 0
+    while (line < fileLines.length) {
+      let currentLine = fileLines[line]
 
-      if(startsWith(currentLine, 'INSERT INTO')) {
-        currentLine = currentLine.replace('INSERT INTO `' + tableName + '` VALUES ', '');
-        var index = 1;
-        var valueId = 0
-        var insideString = false;
-        var currentValue = '';
-        var values = [];
-        var pair = {};
+      if (startsWith(currentLine, insertKey)) {
+        currentLine = currentLine.replace(insertKey, '')
+        let index = 1
+        let valueId = 0
+        let insideString = false
+        let currentValue = ''
+        const values = []
+        let pair = {}
 
-        while(index < currentLine.length) {
-          var previousChar = currentLine.charAt(index - 1);
-          var currentChar = currentLine.charAt(index);
+        while (index < currentLine.length) {
+          const previousChar = currentLine.charAt(index - 1)
+          const currentChar = currentLine.charAt(index)
 
-          if((currentChar === ',' || currentChar === ')') && !insideString) {
-            var field = fields[valueId];
-            pair[field.name] = convertData(currentValue, field.type);
-
-            valueId++;
-            currentValue = '';
-
-            if(currentChar === ')') {
-              index += 2;
-              values.push(pair);
-              pair = {};
-              valueId = 0;
+          if ((currentChar === ',' || currentChar === ')') && !insideString) {
+            const field = fields[valueId]
+            if (field !== undefined) {
+              pair[field.name] = convertData(currentValue, field.type)
             }
-          }
-          else if(currentChar === "'" && previousChar !== '\\') {
-            insideString = !insideString;
-          }
-          else {
-            currentValue = currentValue + currentChar;
+
+            valueId++
+            currentValue = ''
+
+            if (currentChar === ')') {
+              index += 2
+              values.push(pair)
+              pair = {}
+              valueId = 0
+            }
+          } else if (currentChar === "'" && previousChar !== '\\') {
+            insideString = !insideString
+          } else {
+            currentValue = currentValue + currentChar
           }
 
-          index++;
+          index++
         }
 
-        _collections[_collections.length - 1].values = values;
-        return;
+        return values
       }
+      line++
     }
-  };
+  }
 
   return {
-    init: function () {
-      if(process.argv.length != 3) {
-        reportError(':-)Please specify exactly one mysqldump input file');
+    getData: async (fileName) => {
+      const fileLines = await readFile(fileName)
+      const collections = await populateTableDefs(fileLines)
+
+      // then populate each collection
+      for (const tableName in collections) {
+        // optional check for properties from prototype chain
+        if (collections.hasOwnProperty(tableName)) { // eslint-disable-line
+          const collection = collections[tableName]
+          collections[tableName].values = await readTableValues(collection, fileLines)
+        }
       }
 
-      _fs = require('fs');
-      var fileName = process.argv[2];
-      readFile(fileName);
-
-      while(hasMoreLines()) {
-        readNextTableDef();
-        readTableValues();
-      }
-
-      for(var i = 0; i < _collections.length; i++) {
-        _fs.writeFileSync(_collections[i].name + '.json', JSON.stringify(_collections[i].values, undefined, 2));
-      }
-
-      process.exit();
+      return collections
     }
-  };
-})();
+  }
+})()
 
-Converter.init();
+module.exports = Converter

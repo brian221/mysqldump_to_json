@@ -1,0 +1,23 @@
+{
+  "name": "dump2js",
+  "version": "1.0.0",
+  "description": "Converts mysqldump sql file to JS objects",
+  "main": "converter.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brian221/mysqldump_to_json.git"
+  },
+  "author": "Brian Welter",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/brian221/mysqldump_to_json/issues"
+  },
+  "engines" : { "node" : ">=7.6" },
+  "homepage": "https://github.com/brian221/mysqldump_to_json#readme",
+  "devDependencies": {
+    "standard": "^14.1.0"
+  }
+}
